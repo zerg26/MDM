@@ -30,6 +30,7 @@ pip install -r requirements.txt
 
 - OPENAI_API_KEY
 - SERPAPI_API_KEY
+- GOOGLE_API_KEY
 - (optional) TAVILY_API_KEY and TAVILY_URL
 - (optional) REGISTRY_URL (if you have an external registry)
 - (optional) REGISTRY_BOOST (float, default 0.5)
@@ -52,6 +53,7 @@ python -m src.cli --input sample_data/input.csv --output sample_data/output.csv 
 ```
 
 Troubleshooting
+- for GOOGLE_API_KEY look at https://support.google.com/googleapi/answer/6158841?hl=en and enable Knowledge Graph Search API
 - Tavily DNS / connection errors: if you see `getaddrinfo failed` when running
   Tavily probes, ensure `TAVILY_URL` is set to a resolvable endpoint and the
   machine has outbound network access. Tavily is optional; if unset, the

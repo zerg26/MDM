@@ -11,6 +11,7 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 from dotenv import load_dotenv
 from .utils import normalize_text, normalize_website
 
+
 # NOTE: read env inside functions so newly-created/updated `.env` files or
 # environment variables are picked up at runtime (avoids stale module-level values).
 
@@ -31,6 +32,7 @@ async def search_serpapi(query: str, field: str) -> List[Dict[str, Any]]:
         return []
 
     params = {"q": query, "api_key": SERPAPI_API_KEY}
+
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(SERPAPI_URL, params=params)
         r.raise_for_status()
@@ -182,6 +184,58 @@ async def search_openai(prompt: str, field: str) -> List[Dict[str, Any]]:
                 seen.add((field, canon))
                 candidates.append({"field": field, "value": val_norm, "source": "openai", "confidence": 0.4})
         return candidates
+    
+@retry(wait=wait_exponential(multiplier=0.5, min=0.5, max=4), stop=stop_after_attempt(3))
+async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
+    """Use Google Knowledge Graph Search API to lookup entities."""
+    load_dotenv()
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+    GOOGLE_KG_URL = "https://kgsearch.googleapis.com/v1/entities:search"
+
+    if not GOOGLE_API_KEY:
+        print("GOOGLE_API_KEY not set")
+        return []
+    
+    params = {"query": query, "key": GOOGLE_API_KEY, "limit": 5, "indent": True}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(GOOGLE_KG_URL, params=params)
+            r.raise_for_status()
+            response = r.json()
+    except Exception as e:
+        print("Error calling Google KG API:", e)
+        return []
+
+    candidates = []
+    seen = set()
+    
+    for element in response.get("itemListElement", []):
+        result = element.get("result", {})
+
+        if field == "website":
+            val = result.get("url") or result.get("detailedDescription", {}).get("url")
+            if not val:
+                continue
+            canon = normalize_website(val)
+
+        else:
+            val = result.get(field) or result.get("name") or result.get("description")
+            if not val:
+                continue
+
+            canon = normalize_text(val).lower()
+
+        if (field, canon) not in seen:
+            seen.add((field, canon))
+            candidates.append({
+                "field": field,
+                "value": normalize_website(val) if field == "website" else normalize_text(val),
+                "source": "google",
+                "confidence": 0.85 if field == "website" else 0.75,
+            })
+    print("GOOGLE CANDIDATES:", candidates)
+    return candidates
+
 
 
 async def run_search_agents(row: Dict[str, Any], agents: list | None = None) -> List[Dict[str, Any]]:
@@ -242,6 +296,8 @@ async def run_search_agents(row: Dict[str, Any], agents: list | None = None) -> 
                 tasks.append(search_tavily(query, tfield))
             if want("openai"):
                 tasks.append(search_openai(query, tfield))
+            if want("google"):
+                tasks.append(google_entity_lookup(query, tfield))
 
     if tasks:
         results = await asyncio.gather(*tasks, return_exceptions=True)

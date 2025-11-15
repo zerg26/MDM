@@ -65,6 +65,8 @@ def read_csv(path: str) -> pd.DataFrame:
 
 
 def save_csv(df: pd.DataFrame, path: str) -> None:
+    #keep_columns = ["SOURCE_NAME", "SOURCE_ADDRESS", "SOURCE_COUNTRY", "SOURCE_POSTAL_CODE", "SOURCE_STATE"]
+    #df = df[[col for col in df.columns if col in keep_columns]]
     df.to_csv(path, index=False)
 
 

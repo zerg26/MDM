@@ -3,9 +3,10 @@ import math
 import difflib
 
 
+
 def decide_agents_for_row(row: Dict[str, Any], config: Dict[str, Any] | None = None) -> List[str]:
     """Decide which agents to use for a single row using simple heuristics.
-
+    - prefer google 
     - If `website` is missing: prefer SerpAPI + registry
     - If `company` is missing: query SerpAPI, Tavily and optionally OpenAI
     - If `name` looks ambiguous (short or contains common tokens), include OpenAI
@@ -24,6 +25,8 @@ def decide_agents_for_row(row: Dict[str, Any], config: Dict[str, Any] | None = N
     name = str(row.get("name") or "").strip()
     company = None if is_missing(row.get("company")) else str(row.get("company")).strip()
     website = None if is_missing(row.get("website")) else str(row.get("website")).strip()
+
+    agents.add("google")
 
     # If a config mapping exists (field -> agents), use it to force agents for missing fields
     cfg = config or {}

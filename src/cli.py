@@ -123,6 +123,9 @@ def generate_comparison_report(
     report_lines.append("SEARCH MODE EFFECTIVENESS ANALYSIS")
     report_lines.append("-" * 80)
     report_lines.append("")
+    report_lines.append("Note: Success rate = % of queries with confidence ≥0.7 (high-confidence threshold)")
+    report_lines.append("Agents with 0% success rate may still contribute lower-confidence matches (0.4-0.69)")
+    report_lines.append("")
     
     # Calculate per-agent stats
     agent_stats = {}
@@ -244,22 +247,18 @@ def generate_comparison_report(
     
     # Recommendations
     report_lines.append("-" * 80)
-    report_lines.append("RECOMMENDATIONS")
+    report_lines.append("KEY METRICS")
     report_lines.append("-" * 80)
     report_lines.append("")
     
     best_agent = sorted_agents[0][0] if sorted_agents else "Unknown"
     best_rate = sorted_agents[0][1]["success_rate"] if sorted_agents else 0
+    worst_agent = sorted_agents[-1][0] if sorted_agents else "Unknown"
+    worst_rate = sorted_agents[-1][1]["success_rate"] if sorted_agents else 0
     
     report_lines.append(f"• Best-performing agent: {best_agent.upper()} with {best_rate:.1f}% success rate")
+    report_lines.append(f"• Worst-performing agent: {worst_agent.upper()} with {worst_rate:.1f}% success rate")
     report_lines.append(f"• Overall confirmation rate: {100*confirmed_rows/total_rows:.1f}%")
-    report_lines.append(f"• Most common non-match reason: {max(non_match_counts, key=non_match_counts.get) if non_match_counts else 'N/A'}")
-    report_lines.append("")
-    report_lines.append("To improve results:")
-    report_lines.append("  1. Prioritize multi-query approach (5-7 queries per record improves recall)")
-    report_lines.append("  2. Focus on high-performing search agents for production runs")
-    report_lines.append("  3. Investigate non-matches with 'AMBIGUOUS' or 'NOT_FOUND' classifications")
-    report_lines.append("  4. Consider fuzzy matching to detect spelling/numerical errors in input")
     report_lines.append("")
     
     report_text = "\n".join(report_lines)

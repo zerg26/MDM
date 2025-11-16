@@ -36,10 +36,16 @@ pip install -r requirements.txt
 - (optional) REGISTRY_BOOST (float, default 0.5)
 
 Quick runs
-- Run the CLI on the sample data:
+- Run the CLI on the sample data (batch mode - processes both query files):
 
 ```powershell
-python -m src.cli --input sample_data/input.csv --output sample_data/output.csv --chunk-size 1
+python -m src.cli --batch
+```
+
+- Or run on a single query file:
+
+```powershell
+python -m src.cli --input sample_data/query_group1.csv --output sample_data/output.csv --chunk-size 1 --report sample_data/report.txt
 ```
 
 - Provide a planner config JSON to override agent selection per-row:
@@ -92,31 +98,3 @@ Notes
   implement rate-limiting/backoff tuned to your vendor quotas.
 
 License: MIT
-MDM — Multi-Agent Data Matching Pipeline
-
-This repository contains a scaffold for a multi-agent pipeline that reads a CSV with missing data, uses a Planner agent to split tasks, multiple search agents (OpenAI, Tavily, SerpAPI) to fetch candidate values, and a Verifier agent to reconcile results and produce a completed CSV.
-
-Quick start
-1. Copy `.env.example` to `.env` and add your API keys.
-2. Create a Python environment and install dependencies:
-
-```powershell
-# from repo root
-python -m pip install -r requirements.txt
-```
-
-3. Run the CLI (example):
-
-```powershell
-python -m src.cli --input sample_data/input.csv --output sample_data/output.csv
-```
-
-4. Run tests:
-
-```powershell
-python -m pytest -q
-```
-
-Notes
-- The search agent implementations include HTTP hooks to SerpAPI and a generic Tavily endpoint; OpenAI calls are optional. In tests, these are mocked.
-- This is a scaffolded example to demonstrate the architecture; please fill in API endpoint details and keys before doing large-scale runs.

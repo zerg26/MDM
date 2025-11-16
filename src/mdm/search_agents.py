@@ -144,40 +144,62 @@ async def search_tavily(query: str, field: str) -> List[Dict[str, Any]]:
 
 async def generate_multiple_queries(row: Dict[str, Any], num_queries: int = 6) -> List[str]:
     """Use OpenAI to generate 5-7 diverse queries for a single record.
-    
-    Given company_name, address, state, country, postal_code fields,
+
+    Given SOURCE_NAME, SOURCE_ADDRESS, SOURCE_CITY, SOURCE_STATE, SOURCE_COUNTRY, SOURCE_POSTAL_CODE fields,
     generate varied search queries to maximize recall across search agents.
     """
     load_dotenv()
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    
+    # Extract fields from query CSV schema (with fallback for backward compatibility)
+    company = row.get("SOURCE_NAME") or row.get("SRC_CLEANSED_SOURCE_NAME") or row.get("company_name", "")
+    address = row.get("SOURCE_ADDRESS") or row.get("SRC_CLEANSED_STREET_ADDRESS") or row.get("address", "")
+    city = row.get("SOURCE_CITY") or row.get("SRC_CLEANSED_CITY") or row.get("city", "")
+    state = row.get("SOURCE_STATE") or row.get("SRC_CLEANSED_STATE") or row.get("state", "")
+    country = row.get("SOURCE_COUNTRY") or row.get("country", "")
+    postal = row.get("SOURCE_POSTAL_CODE") or row.get("postal_code", "")
+    
+    company = str(company).strip() if company else ""
+    address = str(address).strip() if address else ""
+    city = str(city).strip() if city else ""
+    state = str(state).strip() if state else ""
+    country = str(country).strip() if country else ""
+    postal = str(postal).strip() if postal else ""
+    
     if not OPENAI_API_KEY:
-        # Fallback: return simple queries
-        company = row.get("company_name", "")
-        address = row.get("address", "")
-        state = row.get("state", "")
-        return [f"{company} {state}", company, f"{company} {address}"]
-    
-    company = row.get("company_name", "").strip()
-    address = row.get("address", "").strip()
-    state = row.get("state", "").strip()
-    country = row.get("country", "").strip()
-    postal = row.get("postal_code", "").strip()
-    
+        # Fallback: return simple queries without LLM
+        queries = []
+        if company and address:
+            queries.append(f"{company} {address}")
+        if company and state:
+            queries.append(f"{company} {state}")
+        if company and postal:
+            queries.append(f"{company} {postal}")
+        if company and city:
+            queries.append(f"{company} {city}")
+        if company:
+            queries.append(company)
+        if company:
+            queries.append(f"{company} headquarters")
+        return queries[:num_queries]
+
     # Build context string
-    context_parts = [p for p in [company, address, state, postal, country] if p]
+    context_parts = [p for p in [company, address, city, state, postal, country] if p]
     context = " | ".join(context_parts)
-    
+
     prompt_text = f"""Generate exactly {num_queries} diverse search queries to verify if the company '{company}' is located at the given address.
-    
+
 Context: {context}
 
 Requirements:
-1. Queries should vary in specificity (some specific with address, some just company name)
+1. Queries should vary in specificity and purpose
 2. Include queries for company + full address
-3. Include queries for company + state/postal code
+3. Include queries for company + city/state/postal code
 4. Include queries for just the company name
-5. Include queries with possible variations (e.g., without Inc, with parent company search)
-6. Generate queries that would work well for web search, knowledge graph lookup, and address verification
+5. Include queries with possible variations (e.g., without Inc, Ltd, Corp suffixes)
+6. Include queries for parent company or headquarters location
+7. Generate queries that work well for Knowledge Graph, web search, and address verification
+8. Queries should help identify if company is present or why it's not (wrong address, merged, vacant, etc)
 
 Return ONLY the queries, one per line, no numbering or additional text."""
 
@@ -189,7 +211,7 @@ Return ONLY the queries, one per line, no numbering or additional text."""
         "max_tokens": 256,
         "temperature": 0.5,
     }
-    
+
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.post(url, json=body, headers=headers)
@@ -203,18 +225,23 @@ Return ONLY the queries, one per line, no numbering or additional text."""
     except Exception as e:
         # Fallback on any error
         pass
-    
+
     # Fallback queries if OpenAI fails
-    return [
-        f"{company} {address} {state}",
-        f"{company} {address}",
-        f"{company} {postal_code}",
-        f"{company} {state}",
-        company,
-        f"{company} headquarters",
-    ]
-
-
+    fallback = []
+    if company and address and state:
+        fallback.append(f"{company} {address} {state}")
+    if company and address:
+        fallback.append(f"{company} {address}")
+    if company and postal:
+        fallback.append(f"{company} {postal}")
+    if company and state:
+        fallback.append(f"{company} {state}")
+    if company:
+        fallback.append(company)
+    if company:
+        fallback.append(f"{company} headquarters")
+    
+    return fallback[:num_queries]
 async def search_openai(prompt: str, field: str) -> List[Dict[str, Any]]:
     """Lightweight wrapper that would call OpenAI to suggest values.
 
@@ -261,7 +288,7 @@ async def search_openai(prompt: str, field: str) -> List[Dict[str, Any]]:
 @retry(wait=wait_exponential(multiplier=0.5, min=0.5, max=4), stop=stop_after_attempt(3))
 async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
     """Use Google Knowledge Graph Search API to lookup entities.
-    
+
     Extended to extract parent company, address info, and presence metadata.
     """
     load_dotenv()
@@ -270,7 +297,7 @@ async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
 
     if not GOOGLE_API_KEY:
         return []
-    
+
     params = {"query": query, "key": GOOGLE_API_KEY, "limit": 5, "indent": True}
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -282,7 +309,7 @@ async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
 
     candidates = []
     seen = set()
-    
+
     for element in response.get("itemListElement", []):
         result = element.get("result", {})
 
@@ -301,31 +328,38 @@ async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
 
         if (field, canon) not in seen:
             seen.add((field, canon))
+
+            # Extract additional metadata
+            description = result.get("detailedDescription", {})
+            detailed_desc = description.get("articleBody", "") if description else ""
             
-            # Extract parent company if available
+            # Try to extract parent company info from description
             parent_company = None
             parent_address = None
-            description = result.get("detailedDescription", {})
-            if description:
-                desc_text = description.get("articleBody", "")
-                # Simple heuristic: look for parent company mentions
-                if "parent" in desc_text.lower():
-                    # In production, use NLP to extract parent company
-                    pass
+            company_status = None
             
+            # Simple heuristics for parent company and status
+            if detailed_desc:
+                desc_lower = detailed_desc.lower()
+                if "parent company" in desc_lower or "subsidiary of" in desc_lower or "owned by" in desc_lower:
+                    parent_company = "See source"  # Mark for manual review
+                if "acquired" in desc_lower or "merged" in desc_lower:
+                    company_status = "MERGED_ACQUIRED"
+                if "defunct" in desc_lower or "closed" in desc_lower or "ceased operations" in desc_lower:
+                    company_status = "OFFICE_VACATED"
+
             candidate = {
                 "field": field,
                 "value": normalize_website(val) if field == "website" else normalize_text(val),
-                "source": "google",
+                "source": "google_kg",
                 "confidence": 0.85 if field == "website" else 0.75,
                 "parent_company": parent_company,
                 "parent_address": parent_address,
+                "company_status": company_status,
             }
             candidates.append(candidate)
-    
+
     return candidates
-
-
 
 async def run_search_agents(row: Dict[str, Any], agents: list | None = None, use_multi_query: bool = True) -> List[Dict[str, Any]]:
     """Run selected search agents (or all agents if agents is None) for missing fields.
@@ -333,6 +367,8 @@ async def run_search_agents(row: Dict[str, Any], agents: list | None = None, use
     agents: list of strings like ['serpapi','tavily','openai','google']
     use_multi_query: if True, generate multiple queries per row for higher recall
     Returns flattened list of candidate dicts, each with extended metadata for tracking.
+    
+    Supports both old schema (company_name, address) and new schema (SOURCE_NAME, SOURCE_ADDRESS, etc)
     """
     # determine which agents to run
     selected = set(a.lower() for a in (agents or [])) if agents is not None else None
@@ -348,22 +384,29 @@ async def run_search_agents(row: Dict[str, Any], agents: list | None = None, use
     # Build queries: either multi-query via LLM or fallback to simple query
     queries = []
     if use_multi_query:
-        # Check if row has address fields (new schema)
-        if any(row.get(f) for f in ["company_name", "address", "state", "postal_code"]):
+        # Check if row has address fields (either schema)
+        has_data = any(row.get(f) for f in [
+            "company_name", "SRC_CLEANSED_SOURCE_NAME", "SOURCE_NAME",
+            "address", "SRC_CLEANSED_STREET_ADDRESS", "SOURCE_ADDRESS",
+            "state", "SRC_CLEANSED_STATE", "SOURCE_STATE",
+            "postal_code", "SOURCE_POSTAL_CODE"
+        ])
+        
+        if has_data:
             try:
                 queries = await generate_multiple_queries(row, num_queries=6)
             except Exception as e:
                 # Fallback to simple query on LLM error
                 pass
-    
+
     # If multi-query didn't produce results, fall back to simple query
     if not queries:
         query_keys = [
             "company_name",
-            "name",
-            "company",
             "SRC_CLEANSED_SOURCE_NAME",
             "SOURCE_NAME",
+            "name",
+            "company",
             "ORGANIZATIONPRIMARYNAME",
         ]
         query = ""
@@ -386,14 +429,14 @@ async def run_search_agents(row: Dict[str, Any], agents: list | None = None, use
     target_fields = ["company", "name", "website"]
     tasks = []
     query_metadata = []  # Track which query/agent produced each result
-    
+
     for query in queries:
         for tfield in target_fields:
-            # Skip field if already present in input
+            # Skip field if already present in input (check both schemas)
             existing = row.get(tfield)
             if existing is not None and (not isinstance(existing, str) or existing.strip() != ""):
                 continue
-            
+
             if want("serpapi"):
                 tasks.append((search_serpapi(query, tfield), query, tfield, "serpapi"))
             if want("tavily"):
@@ -407,7 +450,7 @@ async def run_search_agents(row: Dict[str, Any], agents: list | None = None, use
         # Extract coroutines and metadata
         coros = [t[0] for t in tasks]
         metadata = [(t[1], t[2], t[3]) for t in tasks]
-        
+
         results = await asyncio.gather(*coros, return_exceptions=True)
         for idx, res in enumerate(results):
             if isinstance(res, Exception):
@@ -419,5 +462,5 @@ async def run_search_agents(row: Dict[str, Any], agents: list | None = None, use
                     candidate["query_used"] = query_used
                     candidate["agent"] = agent
                     candidates.append(candidate)
-    
+
     return candidates

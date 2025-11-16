@@ -1,0 +1,100 @@
+================================================================================
+MDM PIPELINE - SEARCH MODE COMPARISON REPORT
+================================================================================
+
+Total rows processed:           15
+Companies confirmed at address: 15 (100.0%)
+Companies NOT confirmed:        0 (0.0%)
+
+--------------------------------------------------------------------------------
+SEARCH MODE EFFECTIVENESS ANALYSIS
+--------------------------------------------------------------------------------
+
+Agent: GOOGLE
+  Total queries executed:           24
+  High-confidence matches (≥0.7):  24 (100.0%)
+  Average confidence score:         0.775
+  Confidence range:                 0.75 - 0.85
+  Coverage (% of total rows):       160.0%
+
+Agent: OPENAI
+  Total queries executed:           270
+  High-confidence matches (≥0.7):  0 (0.0%)
+  Average confidence score:         0.400
+  Confidence range:                 0.40 - 0.40
+  Coverage (% of total rows):       1800.0%
+
+Agent: SERPAPI
+  Total queries executed:           180
+  High-confidence matches (≥0.7):  64 (35.6%)
+  Average confidence score:         0.644
+  Confidence range:                 0.50 - 0.90
+  Coverage (% of total rows):       1200.0%
+
+--------------------------------------------------------------------------------
+AGENT RANKING BY EFFECTIVENESS
+--------------------------------------------------------------------------------
+
+1. GOOGLE          -  100.0% success rate | Avg confidence: 0.775 | Queries: 24
+2. SERPAPI         -   35.6% success rate | Avg confidence: 0.644 | Queries: 180
+3. OPENAI          -    0.0% success rate | Avg confidence: 0.400 | Queries: 270
+
+--------------------------------------------------------------------------------
+NON-MATCH CLASSIFICATION BREAKDOWN
+--------------------------------------------------------------------------------
+
+All companies confirmed (no non-matches)
+
+--------------------------------------------------------------------------------
+SOURCE ATTRIBUTION FOR CONFIRMED MATCHES
+--------------------------------------------------------------------------------
+
+Total confirmed matches: 15
+
+  google_kg                 :   1 matches (   6.7%)
+  openai                    :   8 matches (  53.3%)
+  serpapi.kg                :   1 matches (   6.7%)
+  serpapi.organic           :   8 matches (  53.3%)
+
+--------------------------------------------------------------------------------
+SAMPLE RESULTS (First 5 rows)
+--------------------------------------------------------------------------------
+
+Row 1: Amerijet Caribbean Express
+Address: Piarco International Airport Piarco
+  Presence: True
+  Source(s): serpapi.kg; openai
+
+Row 2: Consolato Neri
+Address: Via Olivitello 19 Lazzaro Motta San Giovanni RC 89065
+  Presence: True
+  Source(s): serpapi.organic
+
+Row 3: Michael Roper
+Address: 2754 Jamestown Ln Mobile AL 36618
+  Presence: True
+  Source(s): openai
+
+Row 4: April Webster
+Address: 371 Pine Run Rd Fombell PA 16123
+  Presence: True
+  Source(s): serpapi.organic
+
+Row 5: Laurie Almeraz
+Address: 276 Stonegate Rd Trout Valley IL 60013
+  Presence: True
+  Source(s): serpapi.organic
+
+--------------------------------------------------------------------------------
+RECOMMENDATIONS
+--------------------------------------------------------------------------------
+
+• Best-performing agent: GOOGLE with 100.0% success rate
+• Overall confirmation rate: 100.0%
+• Most common non-match reason: N/A
+
+To improve results:
+  1. Prioritize multi-query approach (5-7 queries per record improves recall)
+  2. Focus on high-performing search agents for production runs
+  3. Investigate non-matches with 'AMBIGUOUS' or 'NOT_FOUND' classifications
+  4. Consider fuzzy matching to detect spelling/numerical errors in input

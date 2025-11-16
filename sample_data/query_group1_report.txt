@@ -1,0 +1,97 @@
+================================================================================
+MDM PIPELINE - SEARCH MODE COMPARISON REPORT
+================================================================================
+
+Total rows processed:           15
+Companies confirmed at address: 15 (100.0%)
+Companies NOT confirmed:        0 (0.0%)
+
+--------------------------------------------------------------------------------
+SEARCH MODE EFFECTIVENESS ANALYSIS
+--------------------------------------------------------------------------------
+
+Note: Success rate = % of queries with confidence ≥0.7 (high-confidence threshold)
+Agents with 0% success rate may still contribute lower-confidence matches (0.4-0.69)
+
+Agent: GOOGLE
+  Total queries executed:           21
+  High-confidence matches (≥0.7):  21 (100.0%)
+  Average confidence score:         0.774
+  Confidence range:                 0.75 - 0.85
+  Coverage (% of total rows):       140.0%
+
+Agent: OPENAI
+  Total queries executed:           270
+  High-confidence matches (≥0.7):  0 (0.0%)
+  Average confidence score:         0.400
+  Confidence range:                 0.40 - 0.40
+  Coverage (% of total rows):       1800.0%
+
+Agent: SERPAPI
+  Total queries executed:           147
+  High-confidence matches (≥0.7):  53 (36.1%)
+  Average confidence score:         0.647
+  Confidence range:                 0.50 - 0.90
+  Coverage (% of total rows):       980.0%
+
+--------------------------------------------------------------------------------
+AGENT RANKING BY EFFECTIVENESS
+--------------------------------------------------------------------------------
+
+1. GOOGLE          -  100.0% success rate | Avg confidence: 0.774 | Queries: 21
+2. SERPAPI         -   36.1% success rate | Avg confidence: 0.647 | Queries: 147
+3. OPENAI          -    0.0% success rate | Avg confidence: 0.400 | Queries: 270
+
+--------------------------------------------------------------------------------
+NON-MATCH CLASSIFICATION BREAKDOWN
+--------------------------------------------------------------------------------
+
+All companies confirmed (no non-matches)
+
+--------------------------------------------------------------------------------
+SOURCE ATTRIBUTION FOR CONFIRMED MATCHES
+--------------------------------------------------------------------------------
+
+Total confirmed matches: 15
+
+  google_kg                 :   1 matches (   6.7%)
+  openai                    :   9 matches (  60.0%)
+  serpapi.kg                :   2 matches (  13.3%)
+  serpapi.organic           :   5 matches (  33.3%)
+
+--------------------------------------------------------------------------------
+SAMPLE RESULTS (First 5 rows)
+--------------------------------------------------------------------------------
+
+Row 1: April Webster
+Address: 371 Pine Run Rd Fombell PA 16123
+  Presence: True
+  Source(s): openai
+
+Row 2: Neptune Chemical Pump Co Inc
+Address: 24308 Network Pl Chicago IL 60673
+  Presence: True
+  Source(s): openai; google_kg
+
+Row 3: deloitte Bc=Ea Swiss Cvba
+Address: Berkenlaan 8b Machelen Vlaams-Brabant 1831
+  Presence: True
+  Source(s): serpapi.kg
+
+Row 4: Royal Mail Bacs Remittance Centre
+Address: The Remittance Centre Peterborough CAM PE4 5PG
+  Presence: True
+  Source(s): openai
+
+Row 5: Genesys Greenhouse Supplies & Services
+Address: 322 Townline St St Williams ON N0E1P0
+  Presence: True
+  Source(s): openai
+
+--------------------------------------------------------------------------------
+KEY METRICS
+--------------------------------------------------------------------------------
+
+• Best-performing agent: GOOGLE with 100.0% success rate
+• Worst-performing agent: OPENAI with 0.0% success rate
+• Overall confirmation rate: 100.0%

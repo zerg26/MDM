@@ -142,6 +142,106 @@ async def search_tavily(query: str, field: str) -> List[Dict[str, Any]]:
         return candidates
 
 
+async def generate_multiple_queries(row: Dict[str, Any], num_queries: int = 6) -> List[str]:
+    """Use OpenAI to generate 5-7 diverse queries for a single record.
+
+    Given SOURCE_NAME, SOURCE_ADDRESS, SOURCE_CITY, SOURCE_STATE, SOURCE_COUNTRY, SOURCE_POSTAL_CODE fields,
+    generate varied search queries to maximize recall across search agents.
+    """
+    load_dotenv()
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    
+    # Extract fields from query CSV schema (with fallback for backward compatibility)
+    company = row.get("SOURCE_NAME") or row.get("SRC_CLEANSED_SOURCE_NAME") or row.get("company_name", "")
+    address = row.get("SOURCE_ADDRESS") or row.get("SRC_CLEANSED_STREET_ADDRESS") or row.get("address", "")
+    city = row.get("SOURCE_CITY") or row.get("SRC_CLEANSED_CITY") or row.get("city", "")
+    state = row.get("SOURCE_STATE") or row.get("SRC_CLEANSED_STATE") or row.get("state", "")
+    country = row.get("SOURCE_COUNTRY") or row.get("country", "")
+    postal = row.get("SOURCE_POSTAL_CODE") or row.get("postal_code", "")
+    
+    company = str(company).strip() if company else ""
+    address = str(address).strip() if address else ""
+    city = str(city).strip() if city else ""
+    state = str(state).strip() if state else ""
+    country = str(country).strip() if country else ""
+    postal = str(postal).strip() if postal else ""
+    
+    if not OPENAI_API_KEY:
+        # Fallback: return simple queries without LLM
+        queries = []
+        if company and address:
+            queries.append(f"{company} {address}")
+        if company and state:
+            queries.append(f"{company} {state}")
+        if company and postal:
+            queries.append(f"{company} {postal}")
+        if company and city:
+            queries.append(f"{company} {city}")
+        if company:
+            queries.append(company)
+        if company:
+            queries.append(f"{company} headquarters")
+        return queries[:num_queries]
+
+    # Build context string
+    context_parts = [p for p in [company, address, city, state, postal, country] if p]
+    context = " | ".join(context_parts)
+
+    prompt_text = f"""Generate exactly {num_queries} diverse search queries to verify if the company '{company}' is located at the given address.
+
+Context: {context}
+
+Requirements:
+1. Queries should vary in specificity and purpose
+2. Include queries for company + full address
+3. Include queries for company + city/state/postal code
+4. Include queries for just the company name
+5. Include queries with possible variations (e.g., without Inc, Ltd, Corp suffixes)
+6. Include queries for parent company or headquarters location
+7. Generate queries that work well for Knowledge Graph, web search, and address verification
+8. Queries should help identify if company is present or why it's not (wrong address, merged, vacant, etc)
+
+Return ONLY the queries, one per line, no numbering or additional text."""
+
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    body = {
+        "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "messages": [{"role": "user", "content": prompt_text}],
+        "max_tokens": 256,
+        "temperature": 0.5,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=body, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+            choices = data.get("choices") or []
+            if choices:
+                text = choices[0].get("message", {}).get("content", "")
+                queries = [q.strip() for q in text.split("\n") if q.strip()]
+                return queries[:num_queries]
+    except Exception as e:
+        # Fallback on any error
+        pass
+
+    # Fallback queries if OpenAI fails
+    fallback = []
+    if company and address and state:
+        fallback.append(f"{company} {address} {state}")
+    if company and address:
+        fallback.append(f"{company} {address}")
+    if company and postal:
+        fallback.append(f"{company} {postal}")
+    if company and state:
+        fallback.append(f"{company} {state}")
+    if company:
+        fallback.append(company)
+    if company:
+        fallback.append(f"{company} headquarters")
+    
+    return fallback[:num_queries]
 async def search_openai(prompt: str, field: str) -> List[Dict[str, Any]]:
     """Lightweight wrapper that would call OpenAI to suggest values.
 
@@ -187,15 +287,17 @@ async def search_openai(prompt: str, field: str) -> List[Dict[str, Any]]:
     
 @retry(wait=wait_exponential(multiplier=0.5, min=0.5, max=4), stop=stop_after_attempt(3))
 async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
-    """Use Google Knowledge Graph Search API to lookup entities."""
+    """Use Google Knowledge Graph Search API to lookup entities.
+
+    Extended to extract parent company, address info, and presence metadata.
+    """
     load_dotenv()
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     GOOGLE_KG_URL = "https://kgsearch.googleapis.com/v1/entities:search"
 
     if not GOOGLE_API_KEY:
-        print("GOOGLE_API_KEY not set")
         return []
-    
+
     params = {"query": query, "key": GOOGLE_API_KEY, "limit": 5, "indent": True}
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -203,12 +305,11 @@ async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
             r.raise_for_status()
             response = r.json()
     except Exception as e:
-        print("Error calling Google KG API:", e)
         return []
 
     candidates = []
     seen = set()
-    
+
     for element in response.get("itemListElement", []):
         result = element.get("result", {})
 
@@ -227,27 +328,51 @@ async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
 
         if (field, canon) not in seen:
             seen.add((field, canon))
-            candidates.append({
+
+            # Extract additional metadata
+            description = result.get("detailedDescription", {})
+            detailed_desc = description.get("articleBody", "") if description else ""
+            
+            # Try to extract parent company info from description
+            parent_company = None
+            parent_address = None
+            company_status = None
+            
+            # Simple heuristics for parent company and status
+            if detailed_desc:
+                desc_lower = detailed_desc.lower()
+                if "parent company" in desc_lower or "subsidiary of" in desc_lower or "owned by" in desc_lower:
+                    parent_company = "See source"  # Mark for manual review
+                if "acquired" in desc_lower or "merged" in desc_lower:
+                    company_status = "MERGED_ACQUIRED"
+                if "defunct" in desc_lower or "closed" in desc_lower or "ceased operations" in desc_lower:
+                    company_status = "OFFICE_VACATED"
+
+            candidate = {
                 "field": field,
                 "value": normalize_website(val) if field == "website" else normalize_text(val),
-                "source": "google",
+                "source": "google_kg",
                 "confidence": 0.85 if field == "website" else 0.75,
-            })
-    print("GOOGLE CANDIDATES:", candidates)
+                "parent_company": parent_company,
+                "parent_address": parent_address,
+                "company_status": company_status,
+            }
+            candidates.append(candidate)
+
     return candidates
 
-
-
-async def run_search_agents(row: Dict[str, Any], agents: list | None = None) -> List[Dict[str, Any]]:
+async def run_search_agents(row: Dict[str, Any], agents: list | None = None, use_multi_query: bool = True) -> List[Dict[str, Any]]:
     """Run selected search agents (or all agents if agents is None) for missing fields.
 
-    agents: list of strings like ['serpapi','tavily','openai','registry']
-    Returns flattened list of candidate dicts.
+    agents: list of strings like ['serpapi','tavily','openai','google']
+    use_multi_query: if True, generate multiple queries per row for higher recall
+    Returns flattened list of candidate dicts, each with extended metadata for tracking.
+    
+    Supports both old schema (company_name, address) and new schema (SOURCE_NAME, SOURCE_ADDRESS, etc)
     """
     # determine which agents to run
     selected = set(a.lower() for a in (agents or [])) if agents is not None else None
 
-    tasks = []
     candidates = []
 
     # helper to decide whether to call an agent
@@ -256,56 +381,86 @@ async def run_search_agents(row: Dict[str, Any], agents: list | None = None) -> 
             return True
         return agent_name.lower() in selected
 
-    # Build a sensible query from many common source/name fields so we can search even when
-    # 'name' or 'company' keys aren't present (some CSVs use SOURCE_NAME, SRC_CLEANSED_SOURCE_NAME, etc.)
-    query_keys = [
-        "name",
-        "company",
-        "SRC_CLEANSED_SOURCE_NAME",
-        "SOURCE_NAME",
-        "ORGANIZATIONPRIMARYNAME",
-        "SOURCE_ADDRESS",
-        "SRC_CLEANSED_STREET_ADDRESS",
-    ]
-    # pick first non-empty value from candidate keys
-    query = ""
-    for k in query_keys:
-        v = row.get(k)
-        if isinstance(v, str) and v.strip():
-            query = v.strip()
-            break
-        if v is not None and not isinstance(v, str):
-            query = str(v)
-            break
+    # Build queries: either multi-query via LLM or fallback to simple query
+    queries = []
+    if use_multi_query:
+        # Check if row has address fields (either schema)
+        has_data = any(row.get(f) for f in [
+            "company_name", "SRC_CLEANSED_SOURCE_NAME", "SOURCE_NAME",
+            "address", "SRC_CLEANSED_STREET_ADDRESS", "SOURCE_ADDRESS",
+            "state", "SRC_CLEANSED_STATE", "SOURCE_STATE",
+            "postal_code", "SOURCE_POSTAL_CODE"
+        ])
+        
+        if has_data:
+            try:
+                queries = await generate_multiple_queries(row, num_queries=6)
+            except Exception as e:
+                # Fallback to simple query on LLM error
+                pass
 
-    if not query:
+    # If multi-query didn't produce results, fall back to simple query
+    if not queries:
+        query_keys = [
+            "company_name",
+            "SRC_CLEANSED_SOURCE_NAME",
+            "SOURCE_NAME",
+            "name",
+            "company",
+            "ORGANIZATIONPRIMARYNAME",
+        ]
+        query = ""
+        for k in query_keys:
+            v = row.get(k)
+            if isinstance(v, str) and v.strip():
+                query = v.strip()
+                break
+            if v is not None and not isinstance(v, str):
+                query = str(v)
+                break
+        if query:
+            queries = [query]
+
+    if not queries:
         # nothing to query for this row
         return []
 
-    # Only search for a small set of target canonical fields (company/name, website).
-    # Searching every CSV column produces a lot of noisy, irrelevant suggestions
-    # (e.g., organic page titles for unrelated columns). Keep the pipeline focused.
+    # Run all queries across all target agents
     target_fields = ["company", "name", "website"]
-    for tfield in target_fields:
-        # only search if the canonical field is missing/blank in the row
-        existing = row.get(tfield)
-        if existing is None or (isinstance(existing, str) and existing.strip() == ""):
+    tasks = []
+    query_metadata = []  # Track which query/agent produced each result
+
+    for query in queries:
+        for tfield in target_fields:
+            # Skip field if already present in input (check both schemas)
+            existing = row.get(tfield)
+            if existing is not None and (not isinstance(existing, str) or existing.strip() != ""):
+                continue
+
             if want("serpapi"):
-                tasks.append(search_serpapi(query, tfield))
+                tasks.append((search_serpapi(query, tfield), query, tfield, "serpapi"))
             if want("tavily"):
-                tasks.append(search_tavily(query, tfield))
+                tasks.append((search_tavily(query, tfield), query, tfield, "tavily"))
             if want("openai"):
-                tasks.append(search_openai(query, tfield))
+                tasks.append((search_openai(query, tfield), query, tfield, "openai"))
             if want("google"):
-                tasks.append(google_entity_lookup(query, tfield))
+                tasks.append((google_entity_lookup(query, tfield), query, tfield, "google"))
 
     if tasks:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for res in results:
+        # Extract coroutines and metadata
+        coros = [t[0] for t in tasks]
+        metadata = [(t[1], t[2], t[3]) for t in tasks]
+
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for idx, res in enumerate(results):
             if isinstance(res, Exception):
-                # log in real app
                 continue
             if isinstance(res, list):
-                # results already normalized/deduped per-agent; extend
-                candidates.extend(res)
+                query_used, field, agent = metadata[idx]
+                for candidate in res:
+                    # Extend candidate with tracking metadata
+                    candidate["query_used"] = query_used
+                    candidate["agent"] = agent
+                    candidates.append(candidate)
+
     return candidates

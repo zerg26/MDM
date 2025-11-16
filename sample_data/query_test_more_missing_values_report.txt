@@ -1,0 +1,96 @@
+================================================================================
+MDM PIPELINE - SEARCH MODE COMPARISON REPORT
+================================================================================
+
+Total rows processed:           15
+Companies confirmed at address: 15 (100.0%)
+Companies NOT confirmed:        0 (0.0%)
+
+--------------------------------------------------------------------------------
+SEARCH MODE EFFECTIVENESS ANALYSIS
+--------------------------------------------------------------------------------
+
+Note: Success rate = % of queries with confidence ≥0.7 (high-confidence threshold)
+Agents with 0% success rate may still contribute lower-confidence matches (0.4-0.69)
+
+Agent: GOOGLE
+  Total queries executed:           24
+  High-confidence matches (≥0.7):  24 (100.0%)
+  Average confidence score:         0.775
+  Confidence range:                 0.75 - 0.85
+  Coverage (% of total rows):       160.0%
+
+Agent: OPENAI
+  Total queries executed:           270
+  High-confidence matches (≥0.7):  0 (0.0%)
+  Average confidence score:         0.400
+  Confidence range:                 0.40 - 0.40
+  Coverage (% of total rows):       1800.0%
+
+Agent: SERPAPI
+  Total queries executed:           168
+  High-confidence matches (≥0.7):  63 (37.5%)
+  Average confidence score:         0.654
+  Confidence range:                 0.50 - 0.90
+  Coverage (% of total rows):       1120.0%
+
+--------------------------------------------------------------------------------
+AGENT RANKING BY EFFECTIVENESS
+--------------------------------------------------------------------------------
+
+1. GOOGLE          -  100.0% success rate | Avg confidence: 0.775 | Queries: 24
+2. SERPAPI         -   37.5% success rate | Avg confidence: 0.654 | Queries: 168
+3. OPENAI          -    0.0% success rate | Avg confidence: 0.400 | Queries: 270
+
+--------------------------------------------------------------------------------
+NON-MATCH CLASSIFICATION BREAKDOWN
+--------------------------------------------------------------------------------
+
+All companies confirmed (no non-matches)
+
+--------------------------------------------------------------------------------
+SOURCE ATTRIBUTION FOR CONFIRMED MATCHES
+--------------------------------------------------------------------------------
+
+Total confirmed matches: 15
+
+  openai                    :   6 matches (  40.0%)
+  serpapi.kg                :   2 matches (  13.3%)
+  serpapi.organic           :   8 matches (  53.3%)
+
+--------------------------------------------------------------------------------
+SAMPLE RESULTS (First 5 rows)
+--------------------------------------------------------------------------------
+
+Row 1: April Webster
+Address: 371 Pine Run Rd Fombell PA 16123
+  Presence: True
+  Source(s): serpapi.organic
+
+Row 2: Good Speed Transporte
+Address: 9b Industrial Aviacion 284 San Luis Potosí S.L.P. 78140
+  Presence: True
+  Source(s): openai
+
+Row 3: Amerijet Caribbean Express
+Address: Piarco International Airport Piarco
+  Presence: True
+  Source(s): serpapi.kg; openai
+
+Row 4: Laurie Almeraz
+Address: 276 Stonegate Rd Trout Valley IL 60013
+  Presence: True
+  Source(s): serpapi.organic
+
+Row 5: Neptune Chemical Pump Company Inc. From Metex ...
+Address: 24308 Network Pl Chicago IL 60673
+  Presence: True
+  Source(s): serpapi.organic
+
+--------------------------------------------------------------------------------
+KEY METRICS
+--------------------------------------------------------------------------------
+
+• Best-performing agent: GOOGLE with 100.0% success rate
+• Worst-performing agent: OPENAI with 0.0% success rate
+• Overall confirmation rate: 100.0%

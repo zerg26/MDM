@@ -13,6 +13,12 @@ from src.mdm.search_agents import run_search_agents
 from src.mdm.verifier import verify_candidates
 
 
+import pandas as pd
+import gradio as gr
+
+
+
+
 def run_pipeline(
     input_path: str, 
     output_path: str, 
@@ -268,78 +274,192 @@ def generate_comparison_report(
     logger.info(f"Comparison report saved to {report_path}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run MDM multi-agent pipeline for query verification")
-    parser.add_argument("--input", help="Input CSV path (query_group1.csv or query_test_more_missing_values.csv)")
-    parser.add_argument("--output", help="Output CSV path")
-    parser.add_argument("--report", help="Optional path for comparison report")
-    parser.add_argument("--chunk-size", type=int, default=1)
-    parser.add_argument("--no-multi-query", action="store_true",
-                       help="Disable LLM-based multi-query generation")
-    parser.add_argument("--planner-config", help="Optional JSON file with planner config mapping fields to agents")
-    parser.add_argument("--batch", action="store_true",
-                       help="Process both query_group1.csv and query_test_more_missing_values.csv with reports")
-    args = parser.parse_args()
 
+async def process_single_row_async(row_dict):
+    agents = ["openai", "serpapi", "tavily", "registry"]
+    candidates = await run_search_agents(row_dict, agents=agents)
+    best = verify_candidates(candidates)
+    return candidates, best
+
+
+def process_single_row(text):
+    """
+    Wrapper to make Gradio sync-friendly.
+    """
+    try:
+        row_dict = json.loads(text)
+    except json.JSONDecodeError:
+         
+        row_dict = {}
+        for line in text.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                row_dict[k.strip()] = v.strip()
+
+    candidates, best = asyncio.run(process_single_row_async(row_dict))
+
+    return (
+        json.dumps(candidates, indent=2, ensure_ascii=False),
+        json.dumps(best, indent=2, ensure_ascii=False),
+        )
+
+
+async def process_csv_async(df):
+    agents = ["openai", "serpapi", "tavily", "registry"]
+    rows = rows_from_df(df)
+
+    output_rows = []
+    for row in rows:
+        try:
+            candidates = await run_search_agents(row, agents=agents)
+            best = verify_candidates(candidates)
+        except Exception as e:
+            best = {"error": str(e)}
+
+        # merge results back into row
+        merged = dict(row)
+        if isinstance(best, dict):
+            for k, v in best.items():
+                merged[f"mdm_verified_{k}"] = v
+
+        output_rows.append(merged)
+
+    return pd.DataFrame(output_rows)
+
+
+def process_csv(file):
+    if file is None:
+        return None, "No file uploaded."
+    df = pd.read_csv(file.name)
+
+    out_df = asyncio.run(process_csv_async(df))
+
+    out_path = "processed_output.csv"
+    out_df.to_csv(out_path, index=False)
+
+    return out_path, out_df.head().to_string()
+
+
+def main():
     # load env
     env_path = os.path.join(os.getcwd(), ".env")
     if os.path.exists(env_path):
         load_dotenv(env_path)
 
-    # load planner config if provided
-    planner_config = None
-    if getattr(args, "planner_config", None):
-        with open(args.planner_config, "r", encoding="utf-8") as fh:
-            planner_config = json.load(fh)
 
-    # If batch mode, process both query files
-    if args.batch:
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        query_files = [
-            ("sample_data/query_group1.csv", "sample_data/query_group1_cli_output.csv", "sample_data/query_group1_report.txt"),
-            ("sample_data/query_test_more_missing_values.csv", "sample_data/query_test_more_missing_values_cli_output.csv", "sample_data/query_test_more_missing_values_report.txt"),
-        ]
+
+
+    with gr.Blocks(title="MDM Search Agent UI") as demo:
+
+        gr.Markdown("# 🔍 MDM Debugger & CSV Processor\nTwo tools in one:\n- Inspect a **single row**\n- Process an **entire CSV** end-to-end")
+
+        with gr.Tabs():
+
+    
+            with gr.Tab("🧪 Single Row Debugger"):
+
+                gr.Markdown("Paste a JSON object or key=value pairs:")
+
+                row_input = gr.Textbox(label="Input Row", lines=10, placeholder='{"name":"Acme Corp", "website":"acme.com"}')
+
+                btn_single = gr.Button("Run Agents")
+
+                candidates_out = gr.Textbox(label="Candidate Outputs", lines=12)
+                best_out = gr.Textbox(label="Best Candidate", lines=6)
+
+                btn_single.click(
+                    fn=process_single_row,
+                    inputs=row_input,
+                    outputs=[candidates_out, best_out]
+                )
+
+
+            with gr.Tab("📁 Batch CSV Processor"):
+
+                gr.Markdown("Upload a CSV and run the full pipeline across all rows.")
+
+                csv_upload = gr.File(label="Upload CSV")
+                btn_csv = gr.Button("Process CSV")
+
+                csv_download = gr.File(label="Download Processed CSV")
+                csv_preview = gr.Textbox(label="Preview (first 5 rows)", lines=8)
+
+                btn_csv.click(
+                    fn=process_csv,
+                    inputs=csv_upload,
+                    outputs=[csv_download, csv_preview]
+                )
+
+    demo.launch()
+
+    # parser = argparse.ArgumentParser(description="Run MDM multi-agent pipeline for query verification")
+    # parser.add_argument("--input", help="Input CSV path (query_group1.csv or query_test_more_missing_values.csv)")
+    # parser.add_argument("--output", help="Output CSV path")
+    # parser.add_argument("--report", help="Optional path for comparison report")
+    # parser.add_argument("--chunk-size", type=int, default=1)
+    # parser.add_argument("--no-multi-query", action="store_true",
+    #                    help="Disable LLM-based multi-query generation")
+    # parser.add_argument("--planner-config", help="Optional JSON file with planner config mapping fields to agents")
+    # parser.add_argument("--batch", action="store_true",
+    #                    help="Process both query_group1.csv and query_test_more_missing_values.csv with reports")
+    # args = parser.parse_args()
+
+
+
+    # # load planner config if provided
+    # planner_config = None
+    # if getattr(args, "planner_config", None):
+    #     with open(args.planner_config, "r", encoding="utf-8") as fh:
+    #         planner_config = json.load(fh)
+
+    # # If batch mode, process both query files
+    # if args.batch:
+    #     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    #     query_files = [
+    #         ("sample_data/query_group1.csv", "sample_data/query_group1_cli_output.csv", "sample_data/query_group1_report.txt"),
+    #         ("sample_data/query_test_more_missing_values.csv", "sample_data/query_test_more_missing_values_cli_output.csv", "sample_data/query_test_more_missing_values_report.txt"),
+    #     ]
         
-        for input_file, output_file, report_file in query_files:
-            input_path = os.path.join(base_dir, input_file)
-            output_path = os.path.join(base_dir, output_file)
-            report_path = os.path.join(base_dir, report_file)
+    #     for input_file, output_file, report_file in query_files:
+    #         input_path = os.path.join(base_dir, input_file)
+    #         output_path = os.path.join(base_dir, output_file)
+    #         report_path = os.path.join(base_dir, report_file)
             
-            print(f"\n{'='*80}")
-            print(f"Processing: {input_file}")
-            print(f"{'='*80}\n")
+    #         print(f"\n{'='*80}")
+    #         print(f"Processing: {input_file}")
+    #         print(f"{'='*80}\n")
             
-            # Always generate reports in batch mode
-            run_pipeline(
-                input_path,
-                output_path,
-                report_path=report_path,
-                chunk_size=args.chunk_size,
-                planner_config=planner_config,
-                use_multi_query=not args.no_multi_query
-            )
+    #         # Always generate reports in batch mode
+    #         run_pipeline(
+    #             input_path,
+    #             output_path,
+    #             report_path=report_path,
+    #             chunk_size=args.chunk_size,
+    #             planner_config=planner_config,
+    #             use_multi_query=not args.no_multi_query
+    #         )
         
-        print(f"\n{'='*80}")
-        print("Batch processing complete!")
-        print(f"Generated reports:")
-        for _, _, report_file in query_files:
-            report_path = os.path.join(base_dir, report_file)
-            print(f"  - {report_path}")
-        print(f"{'='*80}\n")
-    else:
-        # Standard single file mode
-        if not args.input or not args.output:
-            parser.error("--input and --output are required when not using --batch mode")
+    #     print(f"\n{'='*80}")
+    #     print("Batch processing complete!")
+    #     print(f"Generated reports:")
+    #     for _, _, report_file in query_files:
+    #         report_path = os.path.join(base_dir, report_file)
+    #         print(f"  - {report_path}")
+    #     print(f"{'='*80}\n")
+    # else:
+    #     # Standard single file mode
+    #     if not args.input or not args.output:
+    #         parser.error("--input and --output are required when not using --batch mode")
         
-        # Call run_pipeline with new parameters
-        run_pipeline(
-            args.input,
-            args.output,
-            report_path=args.report,
-            chunk_size=args.chunk_size,
-            planner_config=planner_config,
-            use_multi_query=not args.no_multi_query
-        )
+    #     # Call run_pipeline with new parameters
+    #     run_pipeline(
+    #         args.input,
+    #         args.output,
+    #         report_path=args.report,
+    #         chunk_size=args.chunk_size,
+    #         planner_config=planner_config,
+    #         use_multi_query=not args.no_multi_query
+    #     )
 
 
 if __name__ == "__main__":

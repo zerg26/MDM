@@ -326,38 +326,77 @@ async def google_entity_lookup(query: str, field: str) -> List[Dict[str, Any]]:
 
             canon = normalize_text(val).lower()
 
-        if (field, canon) not in seen:
-            seen.add((field, canon))
+        if (field, canon) in seen:
+            continue
+        seen.add((field, canon))
 
-            # Extract additional metadata
-            description = result.get("detailedDescription", {})
-            detailed_desc = description.get("articleBody", "") if description else ""
-            
-            # Try to extract parent company info from description
-            parent_company = None
-            parent_address = None
-            company_status = None
-            
-            # Simple heuristics for parent company and status
-            if detailed_desc:
-                desc_lower = detailed_desc.lower()
-                if "parent company" in desc_lower or "subsidiary of" in desc_lower or "owned by" in desc_lower:
-                    parent_company = "See source"  # Mark for manual review
-                if "acquired" in desc_lower or "merged" in desc_lower:
-                    company_status = "MERGED_ACQUIRED"
-                if "defunct" in desc_lower or "closed" in desc_lower or "ceased operations" in desc_lower:
-                    company_status = "OFFICE_VACATED"
+        # Extract additional metadata
+        description = result.get("detailedDescription", {})
+        detailed_desc = description.get("articleBody", "") if description else ""
 
-            candidate = {
-                "field": field,
-                "value": normalize_website(val) if field == "website" else normalize_text(val),
-                "source": "google_kg",
-                "confidence": 0.85 if field == "website" else 0.75,
-                "parent_company": parent_company,
-                "parent_address": parent_address,
-                "company_status": company_status,
-            }
-            candidates.append(candidate)
+        parent_company = None
+        parent_address = None
+        company_status = None
+
+        # Try structured parent org
+        parent_org = result.get("parentOrganization") or result.get("isPartOf")
+        if isinstance(parent_org, list) and parent_org:
+            parent_org = parent_org[0]
+        
+        if isinstance(parent_org, dict):
+            parent_company = parent_org.get("name") or parent_org.get("@id")
+
+        # Try address block
+        address_block = result.get("address") or {}
+        if isinstance(address_block, dict):
+            street = address_block.get("streetAddress") or ""
+            city = address_block.get("addressLocality") or ""
+            region = address_block.get("addressRegion") or ""
+            postal_code = address_block.get("postalCode") or ""
+            country = address_block.get("addressCountry") or ""
+            parent_address = ", ".join([p for p in [street, city, region, postal_code, country] if p]) or None
+
+        # Heuristic scan of description for parent/status and address cues
+        if detailed_desc:
+            desc_lower = detailed_desc.lower()
+
+            # status
+            if "acquired" in desc_lower or "merged" in desc_lower:
+                company_status = "MERGED_ACQUIRED"
+            if "defunct" in desc_lower or "closed" in desc_lower or "ceased operations" in desc_lower:
+                company_status = "OFFICE_VACATED"
+
+            # parent company regexes
+            import re
+
+            if not parent_company:
+                # Expanded regex to catch more patterns
+                parent_match = re.search(r"(?:subsidiary of|owned by|part of|division of|acquired by|brand of)\s+([^.,;\n]+)", desc_lower)
+                if parent_match:
+                    parent_company = parent_match.group(1).strip().title()
+
+            # headquarters / address hints
+            if not parent_address:
+                hq_match = re.search(r"headquartered in\s+([^.,;\n]+)", desc_lower)
+                if hq_match:
+                    parent_address = hq_match.group(1).strip().title()
+
+        # Fallback marker if we saw hints but could not extract
+        if not parent_company and detailed_desc:
+            desc_lower = detailed_desc.lower()
+            if any(k in desc_lower for k in ["parent company", "subsidiary", "owned by", "part of", "acquired by"]):
+                parent_company = "See source"
+
+        candidate = {
+            "field": field,
+            "value": normalize_website(val) if field == "website" else normalize_text(val),
+            "source": "google_kg",
+            "confidence": 0.85 if field == "website" else 0.75,
+            "parent_company": parent_company,
+            "parent_address": parent_address,
+            "company_status": company_status,
+        }
+        candidates.append(candidate)
 
     return candidates
 

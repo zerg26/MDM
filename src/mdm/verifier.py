@@ -46,6 +46,8 @@ def verify_candidates(
     source_map: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
     agent_map: Dict[str, Dict[str, set]] = defaultdict(lambda: defaultdict(set))
     status_map: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
+    parent_company_map: Dict[str, float] = {}
+    parent_address_map: Dict[str, float] = {}
 
     # Normalize candidate values before aggregation to avoid duplicates, but keep originals
     for c in candidates:
@@ -55,6 +57,8 @@ def verify_candidates(
         source = c.get("source", "unknown")
         agent = c.get("agent", source)
         company_status = c.get("company_status")
+        parent_company = c.get("parent_company")
+        parent_address = c.get("parent_address")
 
         if not field or raw_value is None:
             continue
@@ -79,6 +83,14 @@ def verify_candidates(
         agent_map[field][canon].add(agent)
         if company_status and company_status not in status_map[field][canon]:
             status_map[field][canon].append(company_status)
+
+        # Track parent info by confidence (take highest)
+        if parent_company:
+            if parent_company not in parent_company_map or parent_company_map[parent_company] < conf:
+                parent_company_map[parent_company] = conf
+        if parent_address:
+            if parent_address not in parent_address_map or parent_address_map[parent_address] < conf:
+                parent_address_map[parent_address] = conf
 
     result: Dict[str, Any] = {}
     best_sources = {}
@@ -139,8 +151,18 @@ def verify_candidates(
     result["presence_confirmed"] = presence_confirmed
     result["presence_source"] = presence_source
     result["non_match_reason"] = non_match_reason
-    result["parent_company"] = None  # TODO: extract from candidates if available
-    result["parent_address"] = None  # TODO: extract from candidates if available
+
+    # Choose best parent info by highest confidence
+    if parent_company_map:
+        result["parent_company"] = max(parent_company_map.items(), key=lambda kv: kv[1])[0]
+    else:
+        result["parent_company"] = None
+
+    if parent_address_map:
+        result["parent_address"] = max(parent_address_map.items(), key=lambda kv: kv[1])[0]
+    else:
+        result["parent_address"] = None
+
     result["company_status"] = company_statuses[0] if company_statuses else None
 
     return result

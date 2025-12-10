@@ -386,11 +386,11 @@ def main():
 
     with gr.Blocks(title="MDM Search Agent UI") as demo:
 
-        gr.Markdown("# 🔍 MDM Debugger & CSV Processor\nTwo tools in one:\n- Inspect a **single row**\n- Process an **entire CSV** end-to-end")
+        gr.Markdown("MDM Debugger & CSV Processor\nTwo tools in one:\n- Inspect a **single row**\n- Process an **entire CSV** end-to-end")
 
         with gr.Tabs():
 
-            with gr.Tab("🧪 Single Row Debugger"):
+            with gr.Tab("Single Row Debugger"):
                 gr.Markdown("Paste a JSON object or key=value pairs:")
 
                 row_input = gr.Textbox(label="Input Row", lines=10, placeholder='{"name":"Acme Corp", "website":"acme.com"}')
@@ -418,7 +418,7 @@ def main():
                     outputs=[candidates_out, best_out]
                 )
 
-            with gr.Tab("📁 Batch CSV Processor"):
+            with gr.Tab("Batch CSV Processor"):
 
                 gr.Markdown("Upload a CSV and run the full pipeline across all rows.")
 

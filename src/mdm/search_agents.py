@@ -108,7 +108,8 @@ async def search_serpapi(query: str, field: str) -> List[Dict[str, Any]]:
 @retry(wait=wait_exponential(multiplier=0.5, min=0.5, max=4), stop=stop_after_attempt(3))
 async def search_tavily(query: str, field: str) -> List[Dict[str, Any]]:
     """Call a generic Tavily search endpoint (assumed JSON response).
-
+    Accepts a search string and the desired field to be filled
+    Returns a list of possible matches so stakeholders can understand possible source connections with model confidence
     Replace the URL below with your Tavily testing/search endpoint.
     """
     # load env at call time

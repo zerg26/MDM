@@ -8,3 +8,5 @@ dist/
 build/
 .pytest_cache/
 .DS_Store
+_out/
+k8s/secret.yaml

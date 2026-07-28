@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mdm-mcp
+  labels:
+    app: mdm-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mdm-mcp
+  template:
+    metadata:
+      labels:
+        app: mdm-mcp
+    spec:
+      containers:
+        - name: mcp
+          image: mdm:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "src.mdm.mcp_server", "--http", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: mdm-api-keys
+          env:
+            - name: MDM_LOG_JSON
+              value: "1"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mdm-batch
+  labels:
+    app: mdm-batch
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: mdm-batch
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: worker
+          image: mdm:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - src.cli
+            - --input
+            - sample_data/query_group1.csv
+            - --output
+            - /data/output.csv
+            - --engine
+            - graph
+          env:
+            - name: MDM_MCP_ENDPOINT
+              value: "http://mdm-mcp:8000/mcp"
+            - name: MDM_LOG_JSON
+              value: "1"
+          envFrom:
+            - secretRef:
+                name: mdm-api-keys
+          volumeMounts:
+            - name: out
+              mountPath: /data
+      volumes:
+        - name: out
+          emptyDir: {}

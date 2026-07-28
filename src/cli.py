@@ -34,7 +34,7 @@ def run_pipeline(
 
     df = read_csv(input_path)
     rows = rows_from_df(df)
-    tasks = plan_tasks(rows, chunk_size=chunk_size, config=planner_config)
+    tasks = plan_tasks(rows, chunk_size=chunk_size, routing_config=planner_config)
     results: List[Dict[str, Any]] = []
     
     # Track performance metrics for each search mode

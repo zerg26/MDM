@@ -4,14 +4,14 @@ from src.mdm.planner import decide_agents_for_row, plan_tasks
 def test_override_by_id_forces():
     row = {"id": 42, "name": "Acme Corp", "company": "", "website": ""}
     cfg = {"overrides": [{"match": {"id": 42}, "agents": ["openai", "serpapi"], "force": True}]}
-    agents = decide_agents_for_row(row, config=cfg)
+    agents = decide_agents_for_row(row, routing_config=cfg)
     assert set(agents) == {"openai", "serpapi"}
 
 
 def test_override_by_name_merges():
     row = {"id": 2, "name": "Globex", "company": "", "website": ""}
     cfg = {"overrides": [{"match": {"name_contains": "glob"}, "agents": ["registry"], "force": False}]}
-    agents = decide_agents_for_row(row, config=cfg)
+    agents = decide_agents_for_row(row, routing_config=cfg)
     assert "registry" in agents
     # still contains default serpapi for website/company
     assert "serpapi" in agents

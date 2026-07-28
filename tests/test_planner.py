@@ -29,7 +29,7 @@ def test_plan_tasks_with_config_override():
         {"id": 2, "name": "Beta", "company": "", "website": ""},
     ]
     config = {"company": ["tavily"], "website": ["serpapi", "registry"], "default": ["tavily"]}
-    tasks = plan_tasks(rows, chunk_size=1, config=config)
+    tasks = plan_tasks(rows, chunk_size=1, routing_config=config)
     # each task should include tavily due to default and company override
     for t in tasks:
         assert "tavily" in t["agents"]

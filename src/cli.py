@@ -11,6 +11,7 @@ from src.mdm.utils import read_csv, save_csv, rows_from_df, merge_result
 from src.mdm.planner import plan_tasks
 from src.mdm.search_agents import run_search_agents
 from src.mdm.verifier import verify_candidates
+from src.mdm.logging_config import configure_logging
 
 
 import pandas as pd
@@ -20,16 +21,17 @@ import gradio as gr
 
 
 def run_pipeline(
-    input_path: str, 
-    output_path: str, 
+    input_path: str,
+    output_path: str,
     report_path: str | None = None,
-    chunk_size: int = 1, 
+    chunk_size: int = 1,
     planner_config: dict | None = None,
-    use_multi_query: bool = True
+    use_multi_query: bool = True,
+    engine: str = "legacy",
 ) -> None:
     import logging
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    configure_logging()
     logger = logging.getLogger("mdm.cli")
 
     df = read_csv(input_path)
@@ -46,18 +48,28 @@ def run_pipeline(
     })
 
     async def handle_task(task: Dict[str, Any]):
-        task_rows = task.get("rows", [])
+        # NOTE: plan_tasks emits tasks keyed "records" (not "rows").
+        task_rows = task.get("records", task.get("rows", []))
         agents = task.get("agents")
         for row in task_rows:
-            logger.info("Searching for row id=%s name=%s using agents=%s", 
+            logger.info("Searching for row id=%s name=%s using agents=%s",
                        row.get("id"), row.get("company_name", row.get("name")), agents)
-            
-            candidates = await run_search_agents(
-                row, 
-                agents=agents, 
-                use_multi_query=use_multi_query
-            )
-            
+
+            if engine == "graph":
+                # Route the record through the self-healing LangGraph engine.
+                from src.mdm.graph import run_row  # lazy: keeps langgraph optional
+
+                state = await run_row(row, routing_config=planner_config)
+                candidates = state.get("candidates", [])
+                best = state.get("verified", {}) or {}
+            else:
+                candidates = await run_search_agents(
+                    row,
+                    agents=agents,
+                    use_multi_query=use_multi_query
+                )
+                best = verify_candidates(candidates, row=row, threshold=0.6)
+
             # Track agent performance
             for candidate in candidates:
                 agent = candidate.get("agent", "unknown")
@@ -66,17 +78,21 @@ def run_pipeline(
                 agent_performance[agent]["avg_confidence"].append(conf)
                 if conf >= 0.7:
                     agent_performance[agent]["successful_matches"] += 1
-            
-            best = verify_candidates(candidates, row=row, threshold=0.6)
+
             merged = merge_result(row, best)
-            
+
             # Add explicit mdm_verified_* columns
             for f_name, val in (best or {}).items():
                 try:
                     merged[f"mdm_verified_{f_name}"] = val
                 except Exception:
                     merged[f"mdm_verified_{f_name}"] = str(val) if val is not None else ""
-            
+
+            if engine == "graph":
+                # Explainability columns from the graph trace.
+                merged["mdm_failure_category"] = state.get("category") or ""
+                merged["mdm_decision_trace"] = json.dumps(state.get("trace", []), ensure_ascii=False)
+
             results.append(merged)
 
     async def run_all():
@@ -378,12 +394,47 @@ def process_csv(file, agents=None, use_multi_query=False, max_rows: int | None =
     return out_path, preview, report_text, preview_df
 
 
-def main():
-    # load env
-    env_path = os.path.join(os.getcwd(), ".env")
-    if os.path.exists(env_path):
-        load_dotenv(env_path)
+def process_row_graph(text):
+    """Run one record through the self-healing graph engine for the UI.
 
+    Returns (verified_json, failure_category, decision_trace_json) so the UI can
+    show the explainable decision path.
+    """
+    from src.mdm.graph import run_row_sync
+
+    try:
+        row = json.loads(text)
+    except json.JSONDecodeError:
+        row = {}
+        for line in text.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                row[k.strip()] = v.strip()
+
+    state = run_row_sync(row)
+    verified = state.get("verified", {}) or {}
+    category = state.get("category") or ("confirmed" if state.get("confirmed") else "")
+    trace = state.get("trace", [])
+    return (
+        json.dumps(verified, indent=2, ensure_ascii=False),
+        category,
+        json.dumps(trace, indent=2, ensure_ascii=False),
+    )
+
+
+def accept_override(verified_json, override_value):
+    """Human-in-the-loop: record the analyst's final decision."""
+    override_value = (override_value or "").strip()
+    if override_value:
+        return f"OVERRIDE accepted: {override_value}"
+    return f"ACCEPTED as-is:\n{verified_json}"
+
+
+def build_ui():
+    """Build (but do not launch) the Gradio debugging UI.
+
+    Shared with ``app.py`` so the UI has a single definition.
+    """
     with gr.Blocks(title="MDM Search Agent UI") as demo:
 
         gr.Markdown("MDM Debugger & CSV Processor\nTwo tools in one:\n- Inspect a **single row**\n- Process an **entire CSV** end-to-end")
@@ -457,7 +508,88 @@ def main():
                     outputs=[csv_download, csv_preview, csv_report, csv_table]
                 )
 
-    demo.launch()
+            with gr.Tab("Self-Healing Graph (Explainable)"):
+                gr.Markdown(
+                    "Run a record through the **LangGraph self-healing engine** and "
+                    "inspect the explainable decision trace. Override the verified "
+                    "value for human-in-the-loop validation."
+                )
+
+                graph_input = gr.Textbox(
+                    label="Input Row", lines=8,
+                    placeholder='{"name":"Acme Corp", "SOURCE_ADDRESS":"...", "SOURCE_STATE":"..."}'
+                )
+                btn_graph = gr.Button("Run Self-Healing Graph")
+
+                graph_verified = gr.Textbox(label="Verified Record", lines=10)
+                graph_category = gr.Textbox(label="Outcome / Failure Category", lines=1)
+                graph_trace = gr.Textbox(label="Decision Trace (explainability)", lines=14)
+
+                override_box = gr.Textbox(label="Analyst override (optional)", lines=1)
+                btn_accept = gr.Button("Accept / Override")
+                accept_out = gr.Textbox(label="Final Decision", lines=3)
+
+                btn_graph.click(
+                    fn=process_row_graph,
+                    inputs=[graph_input],
+                    outputs=[graph_verified, graph_category, graph_trace],
+                )
+                btn_accept.click(
+                    fn=accept_override,
+                    inputs=[graph_verified, override_box],
+                    outputs=[accept_out],
+                )
+
+    return demo
+
+
+def launch_ui():
+    """Launch the interactive Gradio debugging UI."""
+    env_path = os.path.join(os.getcwd(), ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+    build_ui().launch()
+
+
+def main():
+    """CLI entrypoint: batch-process a CSV, or launch the debugging UI with --ui."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the MDM multi-agent pipeline")
+    parser.add_argument("--input", help="Input CSV path")
+    parser.add_argument("--output", help="Output CSV path (default: <input>_output.csv)")
+    parser.add_argument("--report", help="Optional path for a comparison report")
+    parser.add_argument("--chunk-size", type=int, default=1)
+    parser.add_argument("--planner-config", help="Optional JSON file mapping fields/overrides to agents")
+    parser.add_argument("--engine", choices=["legacy", "graph"], default="legacy",
+                        help="'graph' routes each row through the self-healing LangGraph engine")
+    parser.add_argument("--no-multi-query", action="store_true", help="Disable LLM multi-query expansion")
+    parser.add_argument("--ui", action="store_true", help="Launch the Gradio debugging UI instead of batch processing")
+    args = parser.parse_args()
+
+    env_path = os.path.join(os.getcwd(), ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+
+    if args.ui or not args.input:
+        launch_ui()
+        return
+
+    planner_config = None
+    if args.planner_config:
+        with open(args.planner_config, "r", encoding="utf-8") as fh:
+            planner_config = json.load(fh)
+
+    output_path = args.output or (os.path.splitext(args.input)[0] + "_output.csv")
+    run_pipeline(
+        args.input,
+        output_path,
+        report_path=args.report,
+        chunk_size=args.chunk_size,
+        planner_config=planner_config,
+        use_multi_query=not args.no_multi_query,
+        engine=args.engine,
+    )
 
 
 if __name__ == "__main__":

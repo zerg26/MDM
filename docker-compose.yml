@@ -1,0 +1,27 @@
+services:
+  # MCP agent server: exposes route/search/verify tools over streamable-http.
+  mcp:
+    build: .
+    command: python -m src.mdm.mcp_server --http --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+
+  # Pipeline worker: delegates its search step to the mcp service via MCP.
+  worker:
+    build: .
+    depends_on:
+      - mcp
+    env_file:
+      - .env
+    environment:
+      - MDM_MCP_ENDPOINT=http://mcp:8000/mcp
+      - MDM_LOG_JSON=1
+    command: >
+      python -m src.cli
+      --input sample_data/query_group1.csv
+      --output /data/output.csv
+      --engine graph
+    volumes:
+      - ./_out:/data

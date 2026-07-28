@@ -23,6 +23,8 @@ def test_serpapi_dedupe(monkeypatch):
     async def fake_get(*args, **kwargs):
         return FakeResp(data)
 
+    # Ensure the agent runs regardless of whether a real .env key is present.
+    monkeypatch.setenv('SERPAPI_API_KEY', 'test-key')
     monkeypatch.setattr('httpx.AsyncClient.get', fake_get)
     res = asyncio.run(search_serpapi('Acme Corp', 'company'))
     # deduped: expect first company candidate and organic ones (unique)
@@ -43,6 +45,8 @@ def test_openai_parsing(monkeypatch):
     async def fake_post(*args, **kwargs):
         return FakeResp(data)
 
+    # Ensure the agent runs regardless of whether a real .env key is present.
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-key')
     monkeypatch.setattr('httpx.AsyncClient.post', fake_post)
     res = asyncio.run(search_openai('Acme Corp', 'company'))
     assert any(r['value'] == 'Acme Corp' for r in res)
